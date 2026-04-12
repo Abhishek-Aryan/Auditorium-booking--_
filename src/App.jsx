@@ -214,12 +214,22 @@ class MockAPI {
 const BookingEngine = {
   SLOTS: ["08:00","09:00","10:00","11:00","12:00","13:00","14:00","15:00","16:00","17:00"],
   
-  isSlotAvailable(auditoriumId, date, startSlot, bookings) {
-    return !bookings.some(b => 
-      b.auditoriumId === auditoriumId && 
-      b.date === date && 
-      b.startSlot === startSlot
-    );
+  isSlotAvailable(auditoriumId, date, startSlot, duration = 1, bookings) {
+    const startIdx = this.SLOTS.indexOf(startSlot);
+    if (startIdx === -1 || startIdx + duration > this.SLOTS.length) return false;
+    
+    for(let i = 0; i < duration; i++) {
+        const targetIdx = startIdx + i;
+        const exists = bookings.some(b => {
+             if (b.auditoriumId !== auditoriumId || b.date !== date) return false;
+             const bStartIdx = this.SLOTS.indexOf(b.startSlot);
+             let bEndIdx = this.SLOTS.indexOf(b.endSlot);
+             if (bEndIdx === -1) bEndIdx = bStartIdx + 1;
+             return targetIdx >= bStartIdx && targetIdx < bEndIdx;
+        });
+        if (exists) return false;
+    }
+    return true;
   },
 
   checkCollision(newBooking, existingBookings) {
@@ -230,18 +240,18 @@ const BookingEngine = {
     ) || null;
   },
 
-  suggestAlternatives(auditoriumId, date, preferredSlot, bookings, auditoriums) {
+  suggestAlternatives(auditoriumId, date, preferredSlot, duration = 1, bookings, auditoriums) {
     let nextFreeSlot = null;
     const prefIdx = this.SLOTS.indexOf(preferredSlot);
-    for(let i = prefIdx + 1; i < this.SLOTS.length; i++) {
-      if(this.isSlotAvailable(auditoriumId, date, this.SLOTS[i], bookings)) {
+    for(let i = prefIdx + 1; i <= this.SLOTS.length - duration; i++) {
+      if(this.isSlotAvailable(auditoriumId, date, this.SLOTS[i], duration, bookings)) {
         nextFreeSlot = this.SLOTS[i];
         break;
       }
     }
 
     const preferredAudi = auditoriums.find(a => a.id === auditoriumId);
-    let alterns = auditoriums.filter(a => a.id !== auditoriumId && this.isSlotAvailable(a.id, date, preferredSlot, bookings));
+    let alterns = auditoriums.filter(a => a.id !== auditoriumId && this.isSlotAvailable(a.id, date, preferredSlot, duration, bookings));
     if (preferredAudi) {
        alterns.sort((a, b) => Math.abs(a.capacity - preferredAudi.capacity) - Math.abs(b.capacity - preferredAudi.capacity));
     }
@@ -556,53 +566,78 @@ function ScheduleView() {
 
                   {/* Slot Render Logic */}
                   <div className="flex flex-1">
-                    {BookingEngine.SLOTS.map(slot => {
-                      if (loading) return <div key={slot} className="flex-1 border-r border-white/5 p-1.5"><div className="w-full h-[60px] bg-white/5 animate-pulse rounded-lg" /></div>;
+                    {(() => {
+                      if (loading) {
+                        return BookingEngine.SLOTS.map(slot => (
+                          <div key={slot} className="flex-1 border-r border-white/5 p-1.5"><div className="w-full h-[60px] bg-white/5 animate-pulse rounded-lg" /></div>
+                        ));
+                      }
                       
-                      const bk = BookingEngine.checkCollision({ auditoriumId: audi.id, date, startSlot: slot }, bookings);
-                      const isCurrent = slot.startsWith(CURRENT_HOUR.split(":")[0]) && isSameDay(parseISO(date), new Date());
-                      
-                      return (
-                        <div key={slot} className={cn("flex-1 border-r last:border-r-0 border-white/5 relative p-1.5 h-[76px]", isCurrent && "bg-white/5")}>
-                          {bk ? (
-                             <div className="group/booking w-full h-full relative cursor-default">
-                               <div className={cn("w-full h-full rounded-xl flex flex-col justify-center px-3 py-1.5 border overflow-hidden relative",
-                                  bk.status === 'confirmed' ? "bg-indigo-500/20 border-indigo-500/40" : "bg-amber-500/20 border-amber-500/40"
-                               )}>
-                                 <p className={cn("text-sm font-bold truncate pr-1 leading-tight", bk.status === 'confirmed' ? "text-indigo-200" : "text-amber-200")}>{bk.purpose}</p>
-                                 <p className={cn("text-[10px] uppercase font-bold tracking-widest mt-0.5", bk.status === 'confirmed' ? "text-indigo-400/80" : "text-amber-400/80")}>{bk.status}</p>
-                               </div>
+                      const cells = [];
+                      for (let i = 0; i < BookingEngine.SLOTS.length; ) {
+                        const slot = BookingEngine.SLOTS[i];
+                        const bk = bookings.find(b => b.auditoriumId === audi.id && b.date === date && b.startSlot === slot);
+                        
+                        const isCurrent = slot.startsWith(CURRENT_HOUR.split(":")[0]) && isSameDay(parseISO(date), new Date());
 
-                                {/* Deep Hover Tech-Card Popover */}
-                                <div className="absolute hidden group-hover/booking:block z-[999] left-1/2 -translate-x-1/2 bottom-[110%] w-[300px] pointer-events-none">
-                                  <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl p-5 shadow-black/80">
-                                    <div className="flex justify-between items-start mb-3">
-                                      <div className="flex items-center gap-2">
-                                        <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center font-bold text-xs text-slate-300">{currentUser.avatar}</div>
-                                        <div>
-                                          <p className="font-bold text-sm text-white line-clamp-1">{bk.requester_name || "Anonymous user"}</p>
-                                          <p className="text-[10px] text-slate-500 uppercase tracking-widest">{bk.department || "No Dept"}</p>
-                                        </div>
-                                      </div>
-                                    </div>
-                                    <p className="text-sm text-slate-300 font-medium mb-3">{bk.purpose}</p>
-                                    <div className="bg-white/5 rounded-lg p-2.5 flex items-center justify-between text-xs">
-                                       <span className="flex items-center gap-1.5 text-slate-400"><Users className="w-3.5 h-3.5"/> {bk.attendance} pax</span>
-                                       <span className={cn("font-bold", bk.status==='confirmed'?"text-emerald-400":"text-amber-400")}>{bk.status.toUpperCase()}</span>
-                                    </div>
-                                  </div>
-                                </div>
-                             </div>
-                          ) : (
-                             <button onClick={() => handleCellClick(audi.id, slot)} 
-                               aria-label={`Book ${audi.name} at ${slot}`}
-                               className="w-full h-full rounded-xl flex items-center justify-center border-2 border-dashed border-white/10 hover:border-emerald-500/60 transition-all duration-300 group/slot cursor-pointer bg-white/[0.01]">
-                               <span className="text-[10px] text-emerald-400 font-bold opacity-0 group-hover/slot:opacity-100 uppercase tracking-widest bg-emerald-500/10 px-2.5 py-1 rounded-md drop-shadow-lg backdrop-blur">Click to book</span>
-                             </button>
-                          )}
-                        </div>
-                      )
-                    })}
+                        if (bk) {
+                          const sIdx = i;
+                          let eIdx = BookingEngine.SLOTS.indexOf(bk.endSlot);
+                          if (eIdx === -1) {
+                             eIdx = BookingEngine.SLOTS.indexOf(String(parseInt(bk.endSlot.split(':')[0])).padStart(2,'0')+":00");
+                             if(eIdx === -1) eIdx = sIdx + 1;
+                          }
+                          let dur = (eIdx > sIdx) ? (eIdx - sIdx) : 1;
+                          
+                          cells.push(
+                            <div key={slot} style={{ flex: dur }} className={cn("border-r last:border-r-0 border-white/5 relative p-1.5 h-[76px]", isCurrent && "bg-white/5")}>
+                               <div className="group/booking w-full h-full relative cursor-default">
+                                 <div className={cn("w-full h-full rounded-xl flex flex-col justify-center px-3 py-1.5 border overflow-hidden relative",
+                                    bk.status === 'confirmed' ? "bg-indigo-500/20 border-indigo-500/40" : "bg-amber-500/20 border-amber-500/40"
+                                 )}>
+                                   <p className={cn("text-sm font-bold truncate pr-1 leading-tight", bk.status === 'confirmed' ? "text-indigo-200" : "text-amber-200")}>{bk.purpose}</p>
+                                   <p className={cn("text-[10px] uppercase font-bold tracking-widest mt-0.5", bk.status === 'confirmed' ? "text-indigo-400/80" : "text-amber-400/80")}>{bk.status}</p>
+                                   <span className="absolute bottom-1.5 right-2 opacity-50"><Clock className="w-3 h-3" /></span>
+                                 </div>
+
+                                 {/* Deep Hover Tech-Card Popover */}
+                                 <div className="absolute hidden group-hover/booking:block z-[999] left-1/2 -translate-x-1/2 bottom-[110%] w-[300px] pointer-events-none">
+                                   <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl p-5 shadow-black/80">
+                                     <div className="flex justify-between items-start mb-3">
+                                       <div className="flex items-center gap-2">
+                                         <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center font-bold text-xs text-slate-300">{currentUser.avatar}</div>
+                                         <div>
+                                           <p className="font-bold text-sm text-white line-clamp-1">{bk.requester_name || "Anonymous user"}</p>
+                                           <p className="text-[10px] text-slate-500 uppercase tracking-widest">{bk.department || "No Dept"}</p>
+                                         </div>
+                                       </div>
+                                     </div>
+                                     <p className="text-sm text-slate-300 font-medium mb-3">{bk.purpose}</p>
+                                     <div className="bg-white/5 rounded-lg p-2.5 flex items-center justify-between text-xs">
+                                        <span className="flex items-center gap-1.5 text-slate-400"><Users className="w-3.5 h-3.5"/> {bk.attendance} pax</span>
+                                        <span className={cn("font-bold", bk.status==='confirmed'?"text-emerald-400":"text-amber-400")}>{bk.status.toUpperCase()}</span>
+                                     </div>
+                                   </div>
+                                 </div>
+                               </div>
+                            </div>
+                          );
+                          i += dur; // Skip the spanned columns
+                        } else {
+                          cells.push(
+                            <div key={slot} style={{ flex: 1 }} className={cn("border-r last:border-r-0 border-white/5 relative p-1.5 h-[76px]", isCurrent && "bg-white/5")}>
+                               <button onClick={() => handleCellClick(audi.id, slot)} 
+                                 aria-label={`Book ${audi.name} at ${slot}`}
+                                 className="w-full h-full rounded-xl flex items-center justify-center border-2 border-dashed border-white/10 hover:border-emerald-500/60 transition-all duration-300 group/slot cursor-pointer bg-white/[0.01]">
+                                 <span className="text-[10px] text-emerald-400 font-bold opacity-0 group-hover/slot:opacity-100 uppercase tracking-widest bg-emerald-500/10 px-2.5 py-1 rounded-md drop-shadow-lg backdrop-blur">Click to book</span>
+                               </button>
+                            </div>
+                          );
+                          i++;
+                        }
+                      }
+                      return cells;
+                    })()}
                   </div>
                 </div>
               ))}
@@ -623,14 +658,18 @@ function BookingPanel({ date, audiId, preferredSlot, existingBookings, onClose }
   const { currentUser, addToast } = useContext(BookingContext);
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [duration, setDuration] = useState(1);
+  
   const audi = SEED_AUDITORIUMS.find(a => a.id === audiId);
-  const isConflict = BookingEngine.checkCollision({ auditoriumId: audi.id, date, startSlot: preferredSlot }, existingBookings) !== null;
-  const alterns = useMemo(() => isConflict ? BookingEngine.suggestAlternatives(audi.id, date, preferredSlot, existingBookings, SEED_AUDITORIUMS) : null, [isConflict, audi.id, date, preferredSlot, existingBookings]);
+  const isConflict = !BookingEngine.isSlotAvailable(audi.id, date, preferredSlot, duration, existingBookings);
+  const alterns = useMemo(() => isConflict ? BookingEngine.suggestAlternatives(audi.id, date, preferredSlot, duration, existingBookings, SEED_AUDITORIUMS) : null, [isConflict, audi.id, date, preferredSlot, duration, existingBookings]);
   
   const [form, setForm] = useState({ purpose: '', attendance: '' });
 
   const onSubmit = async () => {
-    const bk = { auditoriumId: audi.id, userId: currentUser.id, date, startSlot: preferredSlot, endSlot: String(parseInt(preferredSlot)+1).padStart(2,'0')+":00", purpose: form.purpose, attendance: parseInt(form.attendance)||1 };
+    const endHour = parseInt(preferredSlot.split(":")[0]) + duration;
+    const endSlot = String(endHour).padStart(2,'0') + ":00";
+    const bk = { auditoriumId: audi.id, userId: currentUser.id, date, startSlot: preferredSlot, endSlot: endSlot, purpose: form.purpose, attendance: parseInt(form.attendance)||1 };
     const { valid, errors } = BookingEngine.validateBooking(bk, currentUser, audi);
     if (!valid) { addToast(errors[0], 'error'); return; }
 
@@ -673,7 +712,14 @@ function BookingPanel({ date, audiId, preferredSlot, existingBookings, onClose }
                  <div className="bg-white/5 rounded-2xl p-4 border border-white/5"><p className="text-lg font-bold text-white mb-1 leading-tight">{audi.name}</p><div className="flex flex-wrap gap-2 mt-3">{audi.amenities.map(x=><span key={x} className="px-2 py-0.5 rounded bg-white/5 border border-white/10 text-[10px] text-slate-400 uppercase tracking-widest">{x}</span>)}<span className="px-2 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20 text-[10px] text-indigo-400 uppercase tracking-widest">{audi.capacity} Capacity</span></div></div></div>
 
                  <div><p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 border-b border-white/5 pb-2">Time Slot Status</p>
-                 <div className="flex items-center gap-4 bg-white/5 p-4 rounded-2xl border border-white/5"><div className="p-3 bg-white/5 rounded-xl"><Clock className="w-5 h-5 text-slate-400"/></div><div><p className="text-white font-bold">{format(parseISO(date), 'MMM do, yyyy')}</p><p className="text-lg text-emerald-400 font-bold">{preferredSlot}</p></div></div></div>
+                 <div className="flex items-center gap-4 bg-white/5 p-4 rounded-2xl border border-white/5"><div className="p-3 bg-white/5 rounded-xl"><Clock className="w-5 h-5 text-slate-400"/></div><div className="flex-1"><p className="text-white font-bold">{format(parseISO(date), 'MMM do, yyyy')}</p><p className="text-lg text-emerald-400 font-bold">{preferredSlot}</p></div></div></div>
+                 
+                 <div><p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 border-b border-white/5 pb-2">Duration (Hours)</p>
+                 <div className="bg-white/5 p-4 rounded-2xl border border-white/5 flex flex-col gap-3">
+                   <input type="range" min="1" max={BookingEngine.SLOTS.length - BookingEngine.SLOTS.indexOf(preferredSlot)} value={duration} onChange={e=>setDuration(parseInt(e.target.value))} className="w-full accent-emerald-500" />
+                   <p className="text-emerald-400 font-bold text-center">{duration} {duration > 1 ? 'Hours' : 'Hour'} Block</p>
+                   <p className="text-[10px] text-slate-500 text-center uppercase tracking-widest">Ending at {String(parseInt(preferredSlot) + duration).padStart(2,'0')}:00</p>
+                 </div></div>
                  
                  {isConflict ? (
                     <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-2xl"><p className="text-sm font-bold text-rose-400 mb-4 flex items-center gap-2"><AlertCircle className="w-4 h-4"/> Conflict Detected</p>
@@ -703,7 +749,8 @@ function BookingPanel({ date, audiId, preferredSlot, existingBookings, onClose }
                  <div><p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 border-b border-white/5 pb-2">Final Clearance</p>
                  <div className="bg-white/5 rounded-2xl border border-white/10 p-5 space-y-4">
                     <div className="flex justify-between"><span className="text-sm text-slate-500 font-bold">Vector</span><span className="text-sm text-white font-bold">{audi.name}</span></div>
-                    <div className="flex justify-between"><span className="text-sm text-slate-500 font-bold">Lock Time</span><span className="text-sm text-emerald-400 font-bold">{date} @ {preferredSlot}</span></div>
+                    <div className="flex justify-between"><span className="text-sm text-slate-500 font-bold">Lock Time</span><span className="text-sm text-emerald-400 font-bold">{date} — {duration} Hrs</span></div>
+                    <div className="flex justify-between"><span className="text-sm text-slate-500 font-bold">Window</span><span className="text-sm text-indigo-400 font-bold">{preferredSlot} - {String(parseInt(preferredSlot) + duration).padStart(2,'0')}:00</span></div>
                     <div className="h-px bg-white/5" />
                     <div><span className="text-sm text-slate-500 font-bold block mb-1">Directive</span><span className="text-sm text-slate-300">{form.purpose}</span></div>
                     <div><span className="text-sm text-slate-500 font-bold block mb-1">Payload</span><span className="text-sm text-white font-bold bg-white/10 px-2 py-0.5 rounded">{form.attendance} Pax</span></div>
