@@ -109,32 +109,25 @@ const SEED_AUDITORIUMS = [
 const TODAY = format(new Date(), 'yyyy-MM-dd');
 const CURRENT_HOUR = new Date().getHours() + ":00";
 
-const SEED_BOOKINGS = [
-  { id: "bk-1", auditoriumId: "apj", userId: "u-teacher", date: TODAY, startSlot: "10:00", endSlot: "11:00", purpose: "AI Guest Lecture", attendance: 250, status: "confirmed", createdAt: TODAY, approvedBy: "u-admin" },
-  { id: "bk-2", auditoriumId: "apj", userId: "u-club", date: TODAY, startSlot: "14:00", endSlot: "15:00", purpose: "Techfest Rehearsal", attendance: 50, status: "pending", createdAt: TODAY, approvedBy: null },
-  { id: "bk-3", auditoriumId: "ks", userId: "u-admin", date: TODAY, startSlot: "09:00", endSlot: "10:00", purpose: "Orientation Brief", attendance: 180, status: "confirmed", createdAt: TODAY, approvedBy: "u-admin" },
-  { id: "bk-4", auditoriumId: "pg", userId: "u-club", date: TODAY, startSlot: "10:00", endSlot: "11:00", purpose: "Debate Finals", attendance: 100, status: "pending", createdAt: TODAY, approvedBy: null },
-  { id: "bk-5", auditoriumId: "e0", userId: "u-teacher", date: TODAY, startSlot: "12:00", endSlot: "13:00", purpose: "Faculty Sync", attendance: 20, status: "confirmed", createdAt: TODAY, approvedBy: "u-admin" },
-  { id: "bk-6", auditoriumId: "bblock", userId: "u-teacher", date: format(addDays(new Date(), 1), 'yyyy-MM-dd'), startSlot: "08:00", endSlot: "09:00", purpose: "Special Class", attendance: 60, status: "confirmed", createdAt: TODAY, approvedBy: "u-admin" }
-];
+const SEED_BOOKINGS = [];
 
 
 // ── SECTION 3 — MOCK API CLASS ──
 
 class MockAPI {
   static _init() {
-    if (!localStorage.getItem("audisync_bookings_final")) {
-      localStorage.setItem("audisync_bookings_final", JSON.stringify(SEED_BOOKINGS));
+    if (!localStorage.getItem("audisync_bookings_empty")) {
+      localStorage.setItem("audisync_bookings_empty", JSON.stringify(SEED_BOOKINGS));
     }
   }
 
   static async _readAll() {
     this._init();
-    return JSON.parse(localStorage.getItem("audisync_bookings_final"));
+    return JSON.parse(localStorage.getItem("audisync_bookings_empty"));
   }
 
   static async _writeAll(data) {
-    localStorage.setItem("audisync_bookings_final", JSON.stringify(data));
+    localStorage.setItem("audisync_bookings_empty", JSON.stringify(data));
   }
 
   static async getBookings(date) {
