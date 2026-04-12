@@ -98,9 +98,12 @@ const SEED_AUDITORIUMS = [
   { id: "pg", name: "PG Block Seminar Hall", block: "PG Block", capacity: 120, floor: 1, amenities: ["Projector", "AC", "Mic"], status: "active" },
   { id: "bblock", name: "B Block Seminar Hall", block: "B Block", capacity: 80, floor: 1, amenities: ["Projector", "Whiteboard"], status: "active" },
   { id: "ks", name: "KS Auditorium", block: "C Block", capacity: 200, floor: 1, amenities: ["Projector", "AC", "Mic"], status: "active" },
-  { id: "ce0", name: "CE Block Seminar — Floor 0", block: "New Block", capacity: 60, floor: 0, amenities: ["Screen"], status: "active" },
-  { id: "ce1", name: "CE Block Seminar — Floor 1", block: "New Block", capacity: 60, floor: 1, amenities: ["Screen"], status: "active" },
-  { id: "ce2", name: "CE Block Seminar — Floor 2", block: "New Block", capacity: 60, floor: 2, amenities: ["Screen"], status: "active" }
+  { id: "e0", name: "E Block Seminar — Floor 0", block: "E Block", capacity: 60, floor: 0, amenities: ["Screen"], status: "active" },
+  { id: "e1", name: "E Block Seminar — Floor 1", block: "E Block", capacity: 60, floor: 1, amenities: ["Screen"], status: "active" },
+  { id: "e2", name: "E Block Seminar — Floor 2", block: "E Block", capacity: 60, floor: 2, amenities: ["Screen"], status: "active" },
+  { id: "e3", name: "E Block Seminar — Floor 3", block: "E Block", capacity: 60, floor: 3, amenities: ["Screen"], status: "active" },
+  { id: "e4", name: "E Block Seminar — Floor 4", block: "E Block", capacity: 60, floor: 4, amenities: ["Screen"], status: "active" },
+  { id: "e5", name: "E Block Seminar — Floor 5", block: "E Block", capacity: 60, floor: 5, amenities: ["Screen"], status: "active" }
 ];
 
 const TODAY = format(new Date(), 'yyyy-MM-dd');
@@ -111,7 +114,7 @@ const SEED_BOOKINGS = [
   { id: "bk-2", auditoriumId: "apj", userId: "u-club", date: TODAY, startSlot: "14:00", endSlot: "15:00", purpose: "Techfest Rehearsal", attendance: 50, status: "pending", createdAt: TODAY, approvedBy: null },
   { id: "bk-3", auditoriumId: "ks", userId: "u-admin", date: TODAY, startSlot: "09:00", endSlot: "10:00", purpose: "Orientation Brief", attendance: 180, status: "confirmed", createdAt: TODAY, approvedBy: "u-admin" },
   { id: "bk-4", auditoriumId: "pg", userId: "u-club", date: TODAY, startSlot: "10:00", endSlot: "11:00", purpose: "Debate Finals", attendance: 100, status: "pending", createdAt: TODAY, approvedBy: null },
-  { id: "bk-5", auditoriumId: "ce0", userId: "u-teacher", date: TODAY, startSlot: "12:00", endSlot: "13:00", purpose: "Faculty Sync", attendance: 20, status: "confirmed", createdAt: TODAY, approvedBy: "u-admin" },
+  { id: "bk-5", auditoriumId: "e0", userId: "u-teacher", date: TODAY, startSlot: "12:00", endSlot: "13:00", purpose: "Faculty Sync", attendance: 20, status: "confirmed", createdAt: TODAY, approvedBy: "u-admin" },
   { id: "bk-6", auditoriumId: "bblock", userId: "u-teacher", date: format(addDays(new Date(), 1), 'yyyy-MM-dd'), startSlot: "08:00", endSlot: "09:00", purpose: "Special Class", attendance: 60, status: "confirmed", createdAt: TODAY, approvedBy: "u-admin" }
 ];
 
@@ -120,18 +123,18 @@ const SEED_BOOKINGS = [
 
 class MockAPI {
   static _init() {
-    if (!localStorage.getItem("audisync_bookings")) {
-      localStorage.setItem("audisync_bookings", JSON.stringify(SEED_BOOKINGS));
+    if (!localStorage.getItem("audisync_bookings_final")) {
+      localStorage.setItem("audisync_bookings_final", JSON.stringify(SEED_BOOKINGS));
     }
   }
 
   static async _readAll() {
     this._init();
-    return JSON.parse(localStorage.getItem("audisync_bookings"));
+    return JSON.parse(localStorage.getItem("audisync_bookings_final"));
   }
 
   static async _writeAll(data) {
-    localStorage.setItem("audisync_bookings", JSON.stringify(data));
+    localStorage.setItem("audisync_bookings_final", JSON.stringify(data));
   }
 
   static async getBookings(date) {
@@ -273,7 +276,14 @@ const BookingContext = createContext();
 export default function App() {
   const [toasts, setToasts] = useState([]);
   const [activeView, setActiveView] = useState('Dashboard');
-  const [currentUser, setCurrentUser] = useState(SEED_USERS[0]);
+  const [currentUser, setCurrentUser] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('audisync_session')) || null; } catch { return null; }
+  });
+
+  const handleLogout = () => {
+    localStorage.removeItem('audisync_session');
+    setCurrentUser(null);
+  };
 
   const addToast = useCallback((message, type = 'info') => {
     const id = Math.random().toString(36).substring(2, 9);
@@ -309,6 +319,13 @@ export default function App() {
           </AnimatePresence>
         </div>
 
+        {!currentUser ? (
+          <LoginView onLogin={(u) => {
+            localStorage.setItem('audisync_session', JSON.stringify(u));
+            setCurrentUser(u);
+          }} />
+        ) : (
+          <>
         {/* Global Application Nav */}
         <header className="sticky top-0 z-[60] bg-slate-950/60 backdrop-blur-xl border-b border-white/10">
           <div className="max-w-[1400px] mx-auto px-6 h-16 flex items-center justify-between">
@@ -339,7 +356,7 @@ export default function App() {
                   <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{currentUser.role.replace('_',' ')}</p>
                 </div>
               </div>
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-slate-800 to-slate-900 border border-white/10 flex items-center justify-center text-sm font-bold text-slate-300 shadow-inner">
+              <div onClick={handleLogout} title="Log out" className="w-10 h-10 rounded-full bg-gradient-to-br from-slate-800 to-slate-900 border border-white/10 flex items-center justify-center text-sm font-bold text-slate-300 shadow-inner cursor-pointer hover:bg-rose-500/20 hover:text-rose-400 hover:border-rose-500/30 transition-all">
                 {currentUser.avatar}
               </div>
             </div>
@@ -357,7 +374,8 @@ export default function App() {
             </motion.div>
           </AnimatePresence>
         </main>
-        
+        </>
+        )}
       </div>
     </BookingContext.Provider>
   );
@@ -820,7 +838,10 @@ function AdminPanel() {
           <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-3">Demo: Switch User Role</p>
           <div className="flex flex-wrap gap-2">
             {SEED_USERS.map(u => (
-              <button key={u.id} onClick={() => setCurrentUser(u)} className={cn("px-3 py-1.5 rounded bg-slate-900 border text-xs font-bold uppercase tracking-wider transition-all", currentUser.id===u.id?"border-emerald-500 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.2)]":"border-white/10 text-slate-500 hover:text-white")}>{u.role}</button>
+              <button key={u.id} onClick={() => {
+                setCurrentUser(u);
+                localStorage.setItem('audisync_session', JSON.stringify(u));
+              }} className={cn("px-3 py-1.5 rounded bg-slate-900 border text-xs font-bold uppercase tracking-wider transition-all", currentUser.id===u.id?"border-emerald-500 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.2)]":"border-white/10 text-slate-500 hover:text-white")}>{u.role}</button>
             ))}
           </div>
         </div>
@@ -861,6 +882,96 @@ function AdminPanel() {
           </div>
         </GlassCard>
       </div>
+    </div>
+  );
+}
+
+function LoginView({ onLogin }) {
+  const [isLogin, setIsLogin] = useState(true);
+  const [form, setForm] = useState({ name: '', email: '', department: '' });
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!form.email) return;
+    
+    let userObj;
+    if (isLogin) {
+      userObj = SEED_USERS.find(u => u.email.toLowerCase() === form.email.toLowerCase());
+      if (!userObj) {
+        userObj = {
+          id: 'u-' + Math.random().toString(36).substr(2,9),
+          name: form.name || form.email.split('@')[0],
+          email: form.email,
+          role: 'club_lead',
+          department: 'General',
+          avatar: form.email.substring(0,2).toUpperCase()
+        };
+      }
+    } else {
+      userObj = {
+        id: 'u-' + Math.random().toString(36).substr(2,9),
+        name: form.name || form.email.split('@')[0],
+        email: form.email,
+        role: 'club_lead',
+        department: form.department || 'General',
+        avatar: (form.name || form.email).substring(0,2).toUpperCase()
+      };
+    }
+    onLogin(userObj);
+  };
+
+  return (
+    <div className="min-h-[80vh] flex items-center justify-center py-10 px-4">
+      <GlassCard className="max-w-md w-full p-8 relative overflow-hidden">
+        <div className="absolute -right-10 -top-10 w-40 h-40 bg-emerald-500/20 blur-3xl rounded-full pointer-events-none" />
+        <div className="absolute -left-10 -bottom-10 w-40 h-40 bg-indigo-500/20 blur-3xl rounded-full pointer-events-none" />
+
+        <div className="text-center mb-8 relative z-10">
+          <div className="mx-auto w-12 h-12 bg-gradient-to-tr from-emerald-600 to-indigo-600 rounded-xl flex items-center justify-center shadow-[0_0_20px_rgba(16,185,129,0.4)] mb-4">
+             <ShieldCheck className="w-6 h-6 text-white drop-shadow-md" />
+          </div>
+          <h2 className="text-2xl font-bold text-white tracking-tight">Welcome to AudiSync</h2>
+          <p className="text-slate-400 text-sm mt-2">
+            {isLogin ? "Authenticate to manage reservations" : "Create your dispatch identity"}
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4 relative z-10">
+          {!isLogin && (
+            <>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">Full Name</label>
+                <div className="relative">
+                   <Users className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                   <input required type="text" value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="John Doe" className="w-full pl-10 pr-4 py-2.5 bg-slate-900/50 border border-white/10 rounded-xl text-white outline-none focus:border-emerald-500/50 transition-colors text-sm" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">Department / Club</label>
+                <input required type="text" value={form.department} onChange={e => setForm({...form, department: e.target.value})} placeholder="e.g. Computer Science" className="w-full px-4 py-2.5 bg-slate-900/50 border border-white/10 rounded-xl text-white outline-none focus:border-emerald-500/50 transition-colors text-sm" />
+              </div>
+            </>
+          )}
+
+          <div>
+            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">Institutional Email</label>
+            <div className="relative">
+               <Mail className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+               <input required type="email" value={form.email} onChange={e => setForm({...form, email: e.target.value})} placeholder="user@college.edu" className="w-full pl-10 pr-4 py-2.5 bg-slate-900/50 border border-white/10 rounded-xl text-white outline-none focus:border-emerald-500/50 transition-colors text-sm" />
+            </div>
+          </div>
+
+          <button type="submit" className="w-full py-3 mt-4 bg-emerald-500 hover:bg-emerald-400 text-[#0c1120] font-extrabold rounded-xl transition-transform active:scale-95 shadow-[0_0_20px_rgba(16,185,129,0.3)]">
+            {isLogin ? "Authenticate" : "Register Clearance"}
+          </button>
+        </form>
+
+        <div className="mt-6 text-center">
+          <button type="button" onClick={() => setIsLogin(!isLogin)} className="text-xs font-bold text-slate-400 hover:text-white transition-colors">
+            {isLogin ? "Need an identity? Register here" : "Already active? Authenticate"}
+          </button>
+        </div>
+      </GlassCard>
     </div>
   );
 }
