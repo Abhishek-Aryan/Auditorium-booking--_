@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+@theme {
+  --color-slate-950: #020617;
+  --color-indigo-950: #1e1b4b;
+  --color-slate-900: #0f172a;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Base gradients and scrollbars are set at component level where possible, but base body config goes here */
