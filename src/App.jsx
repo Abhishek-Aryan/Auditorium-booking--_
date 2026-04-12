@@ -49,6 +49,15 @@ import { EmailService } from './emailService';
 
 function cn(...inputs) { return twMerge(clsx(inputs)); }
 
+export function format12Hr(slot24) {
+  if (!slot24) return '';
+  const [hour, min] = slot24.split(":");
+  const h = parseInt(hour, 10);
+  const suffix = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 || 12;
+  return `${String(h12).padStart(2, '0')}:${min} ${suffix}`;
+}
+
 // ── SECTION 2 — DATA ARCHITECTURE ──
 
 /** 
@@ -265,8 +274,8 @@ const BookingEngine = {
     if (booking.attendance > auditorium.capacity) errors.push(`Attendance exceeds capacity (${auditorium.capacity}).`);
     if (booking.attendance <= 0) errors.push("Attendance must be greater than 0.");
     
-    booking.status = user.role === 'club_lead' ? 'pending' : 'confirmed';
-    booking.approvedBy = user.role === 'admin' ? user.id : null;
+    booking.status = 'confirmed';
+    booking.approvedBy = user.id;
     return { valid: errors.length === 0, errors };
   }
 };
@@ -545,7 +554,7 @@ function ScheduleView() {
               <div className="flex flex-1">
                 {BookingEngine.SLOTS.map(slot => (
                   <div key={slot} className="flex-1 px-2 py-4 flex flex-col items-center justify-center border-r last:border-r-0 border-white/5">
-                    <span className="text-xs font-bold text-slate-400">{slot}</span>
+                    <span className="text-xs font-bold text-slate-400">{format12Hr(slot)}</span>
                   </div>
                 ))}
               </div>
@@ -712,13 +721,13 @@ function BookingPanel({ date, audiId, preferredSlot, existingBookings, onClose }
                  <div className="bg-white/5 rounded-2xl p-4 border border-white/5"><p className="text-lg font-bold text-white mb-1 leading-tight">{audi.name}</p><div className="flex flex-wrap gap-2 mt-3">{audi.amenities.map(x=><span key={x} className="px-2 py-0.5 rounded bg-white/5 border border-white/10 text-[10px] text-slate-400 uppercase tracking-widest">{x}</span>)}<span className="px-2 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20 text-[10px] text-indigo-400 uppercase tracking-widest">{audi.capacity} Capacity</span></div></div></div>
 
                  <div><p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 border-b border-white/5 pb-2">Time Slot Status</p>
-                 <div className="flex items-center gap-4 bg-white/5 p-4 rounded-2xl border border-white/5"><div className="p-3 bg-white/5 rounded-xl"><Clock className="w-5 h-5 text-slate-400"/></div><div className="flex-1"><p className="text-white font-bold">{format(parseISO(date), 'MMM do, yyyy')}</p><p className="text-lg text-emerald-400 font-bold">{preferredSlot}</p></div></div></div>
+                 <div className="flex items-center gap-4 bg-white/5 p-4 rounded-2xl border border-white/5"><div className="p-3 bg-white/5 rounded-xl"><Clock className="w-5 h-5 text-slate-400"/></div><div className="flex-1"><p className="text-white font-bold">{format(parseISO(date), 'MMM do, yyyy')}</p><p className="text-lg text-emerald-400 font-bold">{format12Hr(preferredSlot)}</p></div></div></div>
                  
                  <div><p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 border-b border-white/5 pb-2">Duration (Hours)</p>
                  <div className="bg-white/5 p-4 rounded-2xl border border-white/5 flex flex-col gap-3">
                    <input type="range" min="1" max={BookingEngine.SLOTS.length - BookingEngine.SLOTS.indexOf(preferredSlot)} value={duration} onChange={e=>setDuration(parseInt(e.target.value))} className="w-full accent-emerald-500" />
                    <p className="text-emerald-400 font-bold text-center">{duration} {duration > 1 ? 'Hours' : 'Hour'} Block</p>
-                   <p className="text-[10px] text-slate-500 text-center uppercase tracking-widest">Ending at {String(parseInt(preferredSlot) + duration).padStart(2,'0')}:00</p>
+                   <p className="text-[10px] text-slate-500 text-center uppercase tracking-widest">Ending at {format12Hr(String(parseInt(preferredSlot) + duration).padStart(2,'0') + ':00')}</p>
                  </div></div>
                  
                  {isConflict ? (
@@ -750,16 +759,13 @@ function BookingPanel({ date, audiId, preferredSlot, existingBookings, onClose }
                  <div className="bg-white/5 rounded-2xl border border-white/10 p-5 space-y-4">
                     <div className="flex justify-between"><span className="text-sm text-slate-500 font-bold">Vector</span><span className="text-sm text-white font-bold">{audi.name}</span></div>
                     <div className="flex justify-between"><span className="text-sm text-slate-500 font-bold">Lock Time</span><span className="text-sm text-emerald-400 font-bold">{date} — {duration} Hrs</span></div>
-                    <div className="flex justify-between"><span className="text-sm text-slate-500 font-bold">Window</span><span className="text-sm text-indigo-400 font-bold">{preferredSlot} - {String(parseInt(preferredSlot) + duration).padStart(2,'0')}:00</span></div>
+                    <div className="flex justify-between"><span className="text-sm text-slate-500 font-bold">Window</span><span className="text-sm text-indigo-400 font-bold">{format12Hr(preferredSlot)} - {format12Hr(String(parseInt(preferredSlot) + duration).padStart(2,'0')+":00")}</span></div>
                     <div className="h-px bg-white/5" />
                     <div><span className="text-sm text-slate-500 font-bold block mb-1">Directive</span><span className="text-sm text-slate-300">{form.purpose}</span></div>
                     <div><span className="text-sm text-slate-500 font-bold block mb-1">Payload</span><span className="text-sm text-white font-bold bg-white/10 px-2 py-0.5 rounded">{form.attendance} Pax</span></div>
                  </div></div>
                  
-                 {currentUser.role === 'club_lead' ? 
-                   <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl"><p className="text-xs font-bold text-amber-500 leading-relaxed uppercase tracking-wider">This request requires Teacher authorization. State will be set to Pending.</p></div> :
-                   <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl"><p className="text-xs font-bold text-emerald-500 leading-relaxed uppercase tracking-wider">Clearance verified. Will auto-deploy to confirmed status.</p></div>
-                 }
+                 <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl"><p className="text-xs font-bold text-emerald-500 leading-relaxed uppercase tracking-wider">Clearance verified. Will auto-deploy to confirmed status.</p></div>
               </motion.div>
             )}
           </AnimatePresence>
