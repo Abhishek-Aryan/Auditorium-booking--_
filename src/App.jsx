@@ -36,7 +36,8 @@
  * and fails silently on network error (fire and forget) while preserving the UX.
  */
 
-import React, { useState, useEffect, useContext, createContext, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useContext, createContext, useMemo, useCallback, useRef } from 'react';
+import emailjs from '@emailjs/browser';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Calendar as CalIcon, MapPin, X, Clock, Navigation, LogIn, LogOut, Loader2, Info, Users,
@@ -156,11 +157,8 @@ class MockAPI {
     const all = await this._readAll();
     const newBooking = { ...bookingObj, id: 'bk-' + Math.random().toString(36).substr(2, 6), createdAt: format(new Date(), 'yyyy-MM-dd') };
     await this._writeAll([...all, newBooking]);
-    
-    // FIRE AND FORGET EMAIL
-    EmailService.sendBookingConfirmation(newBooking, userObj, audiObj)
-      .catch(e => console.warn("Email failed silently:", e));
 
+    // Return booking for email sending in the UI layer (so we can show status)
     return { success: true, booking: newBooking, error: null };
   }
 
@@ -168,8 +166,10 @@ class MockAPI {
     await new Promise(r => setTimeout(r, 400));
     const all = await this._readAll();
     const target = all.find(b => b.id === id);
-    if (!target) return { success: false, error: "Not found" };
-    if (target.userId !== userId && !SEED_USERS.find(u => u.id === userId)?.role === 'admin') {
+    if (!target) return { success: false, error: "Booking not found" };
+    // Allow cancellation if: user owns the booking, OR user is admin
+    const isAdmin = SEED_USERS.find(u => u.id === userId)?.role === 'admin';
+    if (target.userId !== userId && !isAdmin) {
       return { success: false, error: "Unauthorized" };
     }
     const filtered = all.filter(b => b.id !== id);
@@ -678,18 +678,27 @@ function BookingPanel({ date, audiId, preferredSlot, existingBookings, onClose }
   const onSubmit = async () => {
     const endHour = parseInt(preferredSlot.split(":")[0]) + duration;
     const endSlot = String(endHour).padStart(2,'0') + ":00";
-    const bk = { auditoriumId: audi.id, userId: currentUser.id, date, startSlot: preferredSlot, endSlot: endSlot, purpose: form.purpose, attendance: parseInt(form.attendance)||1 };
+    const bk = { auditoriumId: audi.id, userId: currentUser.id, date, startSlot: preferredSlot, endSlot: endSlot, purpose: form.purpose, attendance: parseInt(form.attendance)||1,
+      requester_name: currentUser.name, department: currentUser.department };
     const { valid, errors } = BookingEngine.validateBooking(bk, currentUser, audi);
     if (!valid) { addToast(errors[0], 'error'); return; }
 
     setLoading(true);
-    const { success, error } = await MockAPI.createBooking(bk, currentUser, audi);
-    setLoading(false);
+    const { success, booking: newBooking, error } = await MockAPI.createBooking(bk, currentUser, audi);
+    
     if (success) {
-      addToast("A confirmation email has been sent to " + currentUser.email + " (simulated)", 'success');
+      // Send real email via EmailJS
+      const emailResult = await EmailService.sendBookingConfirmation(newBooking, currentUser, audi);
+      setLoading(false);
+      if (emailResult.success) {
+        addToast(`✅ Booking confirmed! Email sent to ${currentUser.email}`, 'success');
+      } else {
+        addToast(`✅ Booking confirmed! (Email: ${emailResult.error || 'not configured'})`, 'success');
+      }
       onClose();
     } else {
-      addToast(error, 'error');
+      setLoading(false);
+      addToast(error || 'Booking failed', 'error');
     }
   };
 
@@ -804,11 +813,19 @@ function MyBookingsView() {
   }, [currentUser]);
   useEffect(() => { fetch(); }, [fetch]);
 
-  const handleCancel = async (id) => {
-    if(window.confirm("Abort this booking vector?")) {
-      await MockAPI.cancelBooking(id, currentUser.id);
-      addToast("Successfully expunged", "success");
+  const [confirmId, setConfirmId] = useState(null);
+
+  const handleCancel = (id) => setConfirmId(id);
+
+  const doCancel = async () => {
+    if (!confirmId) return;
+    setConfirmId(null);
+    const { success, error } = await MockAPI.cancelBooking(confirmId, currentUser.id);
+    if (success) {
+      addToast('Booking cancelled successfully.', 'success');
       fetch();
+    } else {
+      addToast('Cancel failed: ' + error, 'error');
     }
   };
 
@@ -819,6 +836,31 @@ function MyBookingsView() {
   });
 
   return (
+    <>
+    {/* In-app cancel confirmation modal */}
+    <AnimatePresence>
+      {confirmId && (
+        <>
+          <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}
+            className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[200]"
+            onClick={() => setConfirmId(null)} />
+          <motion.div initial={{opacity:0, scale:0.9}} animate={{opacity:1, scale:1}} exit={{opacity:0, scale:0.9}}
+            className="fixed inset-0 z-[201] flex items-center justify-center p-4">
+            <div className="bg-[#0c1120] border border-white/10 rounded-2xl p-8 w-full max-w-sm shadow-2xl">
+              <div className="w-12 h-12 rounded-full bg-rose-500/10 border border-rose-500/20 flex items-center justify-center mx-auto mb-4">
+                <AlertCircle className="w-6 h-6 text-rose-400" />
+              </div>
+              <h3 className="text-xl font-bold text-white text-center mb-2">Abort Mission?</h3>
+              <p className="text-sm text-slate-400 text-center mb-6">This will permanently cancel your booking. This action cannot be undone.</p>
+              <div className="flex gap-3">
+                <button onClick={() => setConfirmId(null)} className="flex-1 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 font-bold text-sm transition-colors">Keep It</button>
+                <button onClick={doCancel} className="flex-1 py-2.5 rounded-xl bg-rose-500 hover:bg-rose-400 text-white font-bold text-sm transition-colors">Cancel Booking</button>
+              </div>
+            </div>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
     <div className="space-y-6">
       <div className="mb-8">
         <h2 className="text-3xl font-bold tracking-tight text-white">Ops Management</h2>
@@ -854,9 +896,9 @@ function MyBookingsView() {
          </div>
        )}
     </div>
+    </>
   );
 }
-
 function AdminPanel() {
   const { currentUser, setCurrentUser, addToast } = useContext(BookingContext);
   const [bks, setBks] = useState([]);
@@ -940,13 +982,22 @@ function LoginView({ onLogin }) {
     e.preventDefault();
     if (!form.email) return;
     
+    // Derive a STABLE, deterministic user ID from email so the same user always gets the same ID
+    // This ensures bookings created in one session can be cancelled in another
+    const stableId = 'u-' + btoa(form.email.toLowerCase()).replace(/[^a-z0-9]/gi, '').substring(0, 12);
+
     let userObj;
     if (isLogin) {
-      userObj = SEED_USERS.find(u => u.email.toLowerCase() === form.email.toLowerCase());
-      if (!userObj) {
-        userObj = {
-          id: 'u-' + Math.random().toString(36).substr(2,9),
-          name: form.name || form.email.split('@')[0],
+      // Check seed users first (for admin/teacher roles)
+      const seedUser = SEED_USERS.find(u => u.email.toLowerCase() === form.email.toLowerCase());
+      if (seedUser) {
+        userObj = seedUser;
+      } else {
+        // Check if they have a registered profile saved locally
+        const savedProfile = (() => { try { return JSON.parse(localStorage.getItem('audisync_profile_' + stableId)); } catch { return null; } })();
+        userObj = savedProfile || {
+          id: stableId,
+          name: form.email.split('@')[0],
           email: form.email,
           role: 'club_lead',
           department: 'General',
@@ -955,13 +1006,15 @@ function LoginView({ onLogin }) {
       }
     } else {
       userObj = {
-        id: 'u-' + Math.random().toString(36).substr(2,9),
+        id: stableId,
         name: form.name || form.email.split('@')[0],
         email: form.email,
         role: 'club_lead',
         department: form.department || 'General',
         avatar: (form.name || form.email).substring(0,2).toUpperCase()
       };
+      // Persist profile so login returns same data
+      localStorage.setItem('audisync_profile_' + stableId, JSON.stringify(userObj));
     }
     onLogin(userObj);
   };
