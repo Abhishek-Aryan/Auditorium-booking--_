@@ -59,6 +59,33 @@ const SEED_AUDITORIUMS = [
 ];
 
 const TODAY = format(new Date(), 'yyyy-MM-dd');
+const MAX_FUTURE_DAYS = 30;
+
+// ── TIME-AWARE SLOT EXPIRY ──
+// Returns true if a half-slot is already elapsed on the given date
+function isSlotExpired(dateStr, halfSlotId) {
+  const now = new Date();
+  const todayStr = format(now, 'yyyy-MM-dd');
+  // Only expire slots on today's date
+  if (dateStr !== todayStr) return false;
+  const currentHour = now.getHours();
+  const currentMin  = now.getMinutes();
+  const hs = HALF_SLOTS.find(h => h.id === halfSlotId);
+  if (!hs) return false;
+  // Parse end time of the slot
+  const [endH, endM] = hs.end.split(':').map(Number);
+  // If current time is past or equal to the slot's end time, it's expired
+  return currentHour > endH || (currentHour === endH && currentMin >= endM);
+}
+
+// ── VALIDATION HELPERS ──
+function isValidInstitutionalEmail(email) {
+  return /^[a-zA-Z0-9._%+-]+@vnrvjiet\.in$/i.test(email);
+}
+
+function isValidPhoneNumber(phone) {
+  return /^[6-9]\d{9}$/.test(phone);
+}
 
 // ── HALF SLOT DEFINITIONS ──
 export const HALF_SLOTS = [
@@ -457,14 +484,22 @@ function MiniCalendar({ onClose }) {
           const isSelected = dayStr === selectedDate;
           const hasBooking = bookedDates.has(dayStr);
           const isCurrentMonth = isSameMonth(day, viewMonth);
+          // Block past dates and dates beyond MAX_FUTURE_DAYS
+          const todayDate  = new Date(); todayDate.setHours(0,0,0,0);
+          const maxDate    = addDays(todayDate, MAX_FUTURE_DAYS);
+          const dayNorm    = new Date(day); dayNorm.setHours(0,0,0,0);
+          const isPast     = dayNorm < todayDate;
+          const isTooFar   = dayNorm > maxDate;
+          const isDisabled = !isCurrentMonth || isPast || isTooFar;
 
           return (
             <button key={dayStr}
-              onClick={() => { setSelectedDate(dayStr); onClose?.(); }}
-              disabled={!isCurrentMonth}
+              onClick={() => { if (!isDisabled) { setSelectedDate(dayStr); onClose?.(); } }}
+              disabled={isDisabled}
               className={cn(
                 'flex flex-col items-center justify-center h-9 w-full rounded-lg transition-all text-sm font-semibold',
                 !isCurrentMonth   ? 'opacity-0 pointer-events-none' :
+                (isPast || isTooFar) ? 'opacity-25 cursor-not-allowed text-slate-600' :
                 isSelected        ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' :
                 isToday           ? 'ring-1 ring-emerald-500 text-emerald-400 hover:bg-white/10' :
                                     'hover:bg-white/8 text-slate-300',
@@ -704,19 +739,34 @@ function ScheduleView() {
   const handleCellClick = (audiId, halfSlotId) => {
     if (!currentUser) { addToast('Please log in to book.', 'error'); return; }
     if (!BookingEngine.isHalfSlotAvailable(audiId, selectedDate, halfSlotId, bookings)) return;
+    if (isSlotExpired(selectedDate, halfSlotId)) { addToast('This slot has already elapsed.', 'error'); return; }
     setPanelData({ audiId, halfSlotId });
   };
 
-  const prevDate = () => setSelectedDate(format(subDays(parseISO(selectedDate), 1), 'yyyy-MM-dd'));
-  const nextDate = () => setSelectedDate(format(addDays(parseISO(selectedDate), 1), 'yyyy-MM-dd'));
+  const prevDate = () => {
+    const prev = subDays(parseISO(selectedDate), 1);
+    const todayDate = new Date(); todayDate.setHours(0,0,0,0);
+    if (prev >= todayDate) setSelectedDate(format(prev, 'yyyy-MM-dd'));
+  };
+  const nextDate = () => {
+    const next = addDays(parseISO(selectedDate), 1);
+    const todayDate = new Date(); todayDate.setHours(0,0,0,0);
+    const maxDate = addDays(todayDate, MAX_FUTURE_DAYS);
+    if (next <= maxDate) setSelectedDate(format(next, 'yyyy-MM-dd'));
+  };
+
+  // Determine if prev/next buttons should be disabled
+  const todayDateForNav = new Date(); todayDateForNav.setHours(0,0,0,0);
+  const canGoPrev = subDays(parseISO(selectedDate), 1) >= todayDateForNav;
+  const canGoNext = addDays(parseISO(selectedDate), 1) <= addDays(todayDateForNav, MAX_FUTURE_DAYS);
 
   return (
     <div className="space-y-5">
       {/* Controls Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white/[0.04] p-4 rounded-2xl border border-white/[0.08]">
         <div className="flex items-center gap-2">
-          <button onClick={prevDate}
-            className="p-2 hover:bg-white/10 rounded-full transition-colors text-slate-300">
+          <button onClick={prevDate} disabled={!canGoPrev}
+            className={cn('p-2 rounded-full transition-colors', canGoPrev ? 'hover:bg-white/10 text-slate-300' : 'opacity-30 cursor-not-allowed text-slate-600')}>
             <ChevronLeft className="w-5 h-5" />
           </button>
 
@@ -732,8 +782,8 @@ function ScheduleView() {
             <AnimatePresence>{showCal && <MiniCalendar onClose={() => setShowCal(false)} />}</AnimatePresence>
           </div>
 
-          <button onClick={nextDate}
-            className="p-2 hover:bg-white/10 rounded-full transition-colors text-slate-300">
+          <button onClick={nextDate} disabled={!canGoNext}
+            className={cn('p-2 rounded-full transition-colors', canGoNext ? 'hover:bg-white/10 text-slate-300' : 'opacity-30 cursor-not-allowed text-slate-600')}>
             <ChevronRight className="w-5 h-5" />
           </button>
         </div>
@@ -798,6 +848,7 @@ function ScheduleView() {
                         )
                       );
                       const isAvailable = BookingEngine.isHalfSlotAvailable(audi.id, selectedDate, hs.id, bookings);
+                      const expired = isSlotExpired(selectedDate, hs.id);
 
                       return (
                         <div key={hs.id} className="flex-1 border-r last:border-r-0 border-white/[0.04] p-2 min-h-[80px]">
@@ -839,6 +890,13 @@ function ScheduleView() {
                                   </div>
                                 </div>
                               </div>
+                            </div>
+                          ) : expired ? (
+                            /* Expired Cell */
+                            <div className="w-full h-full min-h-[64px] rounded-xl border-2 border-dashed border-white/[0.04] flex items-center justify-center bg-white/[0.02] cursor-not-allowed">
+                              <span className="text-[10px] text-slate-600 font-bold uppercase tracking-widest">
+                                Elapsed
+                              </span>
                             </div>
                           ) : (
                             /* Available Cell */
@@ -906,11 +964,14 @@ function BookingPanel({ date, audiId, initialHalfSlotId, existingBookings, onClo
   );
 
   const canProceedStep1 = !isConflict;
+  const emailValid = isValidInstitutionalEmail(form.email.trim());
+  const phoneValid = isValidPhoneNumber(form.phone.trim());
+
   const canProceedStep2 = (
     form.name.trim().length > 0 &&
     form.rollNo.trim().length > 0 &&
-    form.email.trim().length > 0 &&
-    form.phone.trim().length > 0 &&
+    emailValid &&
+    phoneValid &&
     form.purpose.trim().length >= 10 &&
     form.attendance !== '' &&
     parseInt(form.attendance) > 0
@@ -1049,18 +1110,20 @@ function BookingPanel({ date, audiId, initialHalfSlotId, existingBookings, onClo
                   <div className="grid grid-cols-2 gap-3">
                     {HALF_SLOTS.map(hs => {
                       const available = BookingEngine.isHalfSlotAvailable(audi.id, date, hs.id, existingBookings);
+                      const expired   = isSlotExpired(date, hs.id);
+                      const canSelect = available && !expired;
                       const selected  = halfSlotId === hs.id;
                       return (
                         <button key={hs.id}
-                          onClick={() => available && setHalfSlotId(hs.id)}
-                          disabled={!available}
+                          onClick={() => canSelect && setHalfSlotId(hs.id)}
+                          disabled={!canSelect}
                           className={cn(
                             'relative p-4 rounded-2xl border-2 flex flex-col items-center gap-2.5 transition-all text-center',
-                            selected && available ? 'border-emerald-500 bg-emerald-500/10 shadow-[0_0_20px_rgba(16,185,129,0.1)]' :
-                            available             ? 'border-white/10 hover:border-white/25 bg-white/[0.03]' :
+                            selected && canSelect ? 'border-emerald-500 bg-emerald-500/10 shadow-[0_0_20px_rgba(16,185,129,0.1)]' :
+                            canSelect             ? 'border-white/10 hover:border-white/25 bg-white/[0.03]' :
                                                     'border-white/5 bg-white/[0.02] opacity-40 cursor-not-allowed'
                           )}>
-                          {selected && available && (
+                          {selected && canSelect && (
                             <span className="absolute top-2 right-2 w-4 h-4 bg-emerald-500 rounded-full flex items-center justify-center">
                               <Check className="w-2.5 h-2.5 text-white" />
                             </span>
@@ -1073,7 +1136,10 @@ function BookingPanel({ date, audiId, initialHalfSlotId, existingBookings, onClo
                             <p className="text-[10px] text-slate-500 mt-0.5">{hs.display}</p>
                             <p className="text-[10px] text-slate-600 mt-0.5">{hs.duration}</p>
                           </div>
-                          {!available && (
+                          {expired && (
+                            <span className="text-[9px] text-slate-500 font-bold uppercase bg-white/5 px-2 py-0.5 rounded-full border border-white/10">Elapsed</span>
+                          )}
+                          {!available && !expired && (
                             <span className="text-[9px] text-rose-400 font-bold uppercase bg-rose-500/10 px-2 py-0.5 rounded-full border border-rose-500/20">Booked</span>
                           )}
                         </button>
@@ -1148,8 +1214,15 @@ function BookingPanel({ date, audiId, initialHalfSlotId, existingBookings, onClo
                   </label>
                   <input type="email" value={form.email}
                     onChange={e => setForm({ ...form, email: e.target.value })}
-                    className="w-full px-4 py-2.5 bg-white/[0.04] border border-white/10 focus:border-emerald-500/50 rounded-xl text-white text-sm outline-none transition-colors placeholder:text-slate-600"
+                    className={cn('w-full px-4 py-2.5 bg-white/[0.04] border rounded-xl text-white text-sm outline-none transition-colors placeholder:text-slate-600',
+                      form.email.trim().length > 0 && !emailValid ? 'border-rose-500/50' : 'border-white/10 focus:border-emerald-500/50'
+                    )}
                     placeholder="you@vnrvjiet.in" />
+                  {form.email.trim().length > 0 && !emailValid && (
+                    <p className="text-[10px] text-rose-400 mt-1 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" /> Only @vnrvjiet.in emails are allowed
+                    </p>
+                  )}
                 </div>
 
                 {/* Phone */}
@@ -1158,9 +1231,20 @@ function BookingPanel({ date, audiId, initialHalfSlotId, existingBookings, onClo
                     Phone Number <span className="text-rose-400">*</span>
                   </label>
                   <input type="tel" value={form.phone}
-                    onChange={e => setForm({ ...form, phone: e.target.value })}
-                    className="w-full px-4 py-2.5 bg-white/[0.04] border border-white/10 focus:border-emerald-500/50 rounded-xl text-white text-sm outline-none transition-colors placeholder:text-slate-600"
+                    onChange={e => {
+                      const val = e.target.value.replace(/\D/g, '').slice(0, 10);
+                      setForm({ ...form, phone: val });
+                    }}
+                    maxLength={10}
+                    className={cn('w-full px-4 py-2.5 bg-white/[0.04] border rounded-xl text-white text-sm outline-none transition-colors placeholder:text-slate-600',
+                      form.phone.trim().length > 0 && !phoneValid ? 'border-rose-500/50' : 'border-white/10 focus:border-emerald-500/50'
+                    )}
                     placeholder="e.g. 9876543210" />
+                  {form.phone.trim().length > 0 && !phoneValid && (
+                    <p className="text-[10px] text-rose-400 mt-1 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" /> Enter a valid 10-digit Indian phone number
+                    </p>
+                  )}
                 </div>
 
                 {/* Purpose */}
@@ -1209,11 +1293,13 @@ function BookingPanel({ date, audiId, initialHalfSlotId, existingBookings, onClo
                   <div className="grid grid-cols-2 gap-2">
                     {HALF_SLOTS.map(hs => {
                       const available = BookingEngine.isHalfSlotAvailable(audi.id, date, hs.id, existingBookings);
+                      const expired2  = isSlotExpired(date, hs.id);
+                      const canSel2   = available && !expired2;
                       const selected  = halfSlotId === hs.id;
                       return (
                         <button key={hs.id}
-                          onClick={() => available && setHalfSlotId(hs.id)}
-                          disabled={!available}
+                          onClick={() => canSel2 && setHalfSlotId(hs.id)}
+                          disabled={!canSel2}
                           className={cn(
                             'p-3 rounded-xl border-2 flex items-center gap-2.5 transition-all text-left',
                             selected && available ? 'border-emerald-500 bg-emerald-500/10' :
@@ -1747,9 +1833,12 @@ function LoginView({ onLogin }) {
   const [form, setForm]       = useState({ name: '', rollNo: '', email: '', department: '' });
   const [loading, setLoading] = useState(false);
 
+  const loginEmailValid = isValidInstitutionalEmail(form.email.trim());
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.email) return;
+    if (!loginEmailValid) return;
     setLoading(true);
 
     // Simulate a tiny delay
@@ -1900,12 +1989,19 @@ function LoginView({ onLogin }) {
                     <input required type="email" value={form.email}
                       onChange={e => setForm({ ...form, email: e.target.value })}
                       placeholder="you@vnrvjiet.in"
-                      className="w-full pl-10 pr-4 py-2.5 bg-slate-900/60 border border-white/10 rounded-xl text-white text-sm outline-none focus:border-emerald-500/50 transition-colors placeholder:text-slate-600" />
+                      className={cn('w-full pl-10 pr-4 py-2.5 bg-slate-900/60 border rounded-xl text-white text-sm outline-none transition-colors placeholder:text-slate-600',
+                        form.email.trim().length > 0 && !loginEmailValid ? 'border-rose-500/50' : 'border-white/10 focus:border-emerald-500/50'
+                      )} />
+                    {form.email.trim().length > 0 && !loginEmailValid && (
+                      <p className="text-[10px] text-rose-400 mt-1.5 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3" /> Only @vnrvjiet.in email addresses are allowed
+                      </p>
+                    )}
                   </div>
                 </div>
 
-                <button type="submit" disabled={loading}
-                  className="w-full py-3 bg-emerald-500 hover:bg-emerald-400 disabled:bg-emerald-600 text-[#060e1d] font-extrabold rounded-xl transition-all active:scale-95 shadow-[0_0_20px_rgba(16,185,129,0.25)] flex items-center justify-center gap-2">
+                <button type="submit" disabled={loading || !loginEmailValid}
+                  className="w-full py-3 bg-emerald-500 hover:bg-emerald-400 disabled:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-[#060e1d] font-extrabold rounded-xl transition-all active:scale-95 shadow-[0_0_20px_rgba(16,185,129,0.25)] flex items-center justify-center gap-2">
                   {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Signing in…</> : (isLogin ? 'Sign In' : 'Create Account')}
                 </button>
               </form>
