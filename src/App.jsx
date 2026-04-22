@@ -8,7 +8,7 @@ import React, {
   useState, useEffect, useContext, createContext,
   useMemo, useCallback, useRef,
 } from 'react';
-import emailjs from '@emailjs/browser';
+
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Calendar as CalIcon, MapPin, X, Clock, Sun, Moon,
@@ -101,89 +101,85 @@ function getHalfSlot(slot24) {
 }
 
 // ── SECTION 3 — MOCK API ──
+import { supabase } from './supabaseClient';
+
 class MockAPI {
-  static _init() {
-    if (!localStorage.getItem('audisync_v3_bookings')) {
-      localStorage.setItem('audisync_v3_bookings', JSON.stringify([]));
-    }
-  }
-  static async _readAll() {
-    this._init();
-    const raw = JSON.parse(localStorage.getItem('audisync_v3_bookings') || '[]');
-    // Migration: if booking has no halfSlot, infer from startSlot
-    return raw.map(b => ({
+  static _mapFromDB(b) {
+    return {
       ...b,
-      halfSlot: b.halfSlot || getHalfSlot(b.startSlot).id,
-    }));
-  }
-  static async _writeAll(data) {
-    localStorage.setItem('audisync_v3_bookings', JSON.stringify(data));
-  }
-  static async migrateOldData() {
-    const old = localStorage.getItem('audisync_bookings_empty');
-    if (old) {
-      const parsed = JSON.parse(old);
-      if (parsed.length > 0) {
-        const current = await this._readAll();
-        const merged = [...current, ...parsed.map(b => ({
-          ...b,
-          halfSlot: b.halfSlot || getHalfSlot(b.startSlot).id,
-        }))];
-        await this._writeAll(merged);
-      }
-      localStorage.removeItem('audisync_bookings_empty');
-    }
+      auditoriumId: b.auditoriumId || b.auditoriumid,
+      startSlot: b.startSlot || b.startslot,
+      endSlot: b.endSlot || b.endslot,
+      halfSlot: b.halfSlot || b.halfslot,
+      userId: b.userId || b.userid,
+      approvedBy: b.approvedBy || b.approvedby,
+      createdAt: b.createdAt || b.createdat,
+    };
   }
   static async getBookings(date) {
-    await new Promise(r => setTimeout(r, 300));
-    const all = await this._readAll();
-    return all.filter(b => b.date === date);
+    const { data, error } = await supabase.from('bookings').select('*').eq('date', date);
+    if (error) { console.error('Error fetching bookings:', error); return []; }
+    return (data || []).map(this._mapFromDB);
   }
   static async getAllBookings() {
-    await new Promise(r => setTimeout(r, 200));
-    return this._readAll();
+    const { data, error } = await supabase.from('bookings').select('*');
+    if (error) { console.error('Error fetching all bookings:', error); return []; }
+    return (data || []).map(this._mapFromDB);
   }
   static async getBookingsByUser(userId) {
-    await new Promise(r => setTimeout(r, 300));
-    const all = await this._readAll();
-    return all.filter(b => b.userId === userId);
+    // Try checking both cases in case of mixed setups
+    const { data, error } = await supabase.from('bookings').select('*').eq('userid', userId);
+    if (error) { console.error('Error fetching user bookings:', error); return []; }
+    return (data || []).map(this._mapFromDB);
   }
   static async createBooking(bookingObj) {
-    await new Promise(r => setTimeout(r, 500));
-    const all = await this._readAll();
     const newBooking = {
-      ...bookingObj,
       id: 'bk-' + Math.random().toString(36).substr(2, 8).toUpperCase(),
-      createdAt: format(new Date(), 'yyyy-MM-dd'),
+      auditoriumid: bookingObj.auditoriumId,
+      date: bookingObj.date,
+      startslot: bookingObj.startSlot,
+      endslot: bookingObj.endSlot,
+      halfslot: bookingObj.halfSlot,
+      userid: bookingObj.userId,
+      purpose: bookingObj.purpose,
+      attendance: bookingObj.attendance,
+      status: bookingObj.status,
+      approvedby: bookingObj.approvedBy,
+      createdat: format(new Date(), 'yyyy-MM-dd'),
+      requester_name: bookingObj.requester_name,
+      roll_no: bookingObj.roll_no,
+      phone: bookingObj.phone,
+      email: bookingObj.email
     };
-    await this._writeAll([...all, newBooking]);
-    return { success: true, booking: newBooking, error: null };
+    const { data, error } = await supabase.from('bookings').insert([newBooking]).select();
+    if (error) { console.error('Error creating booking:', error); return { success: false, error: error.message }; }
+    const mappedBooking = this._mapFromDB(data[0]);
+    return { success: true, booking: mappedBooking, error: null };
   }
   static async cancelBooking(id, userId) {
-    await new Promise(r => setTimeout(r, 300));
-    const all = await this._readAll();
-    const target = all.find(b => b.id === id);
-    if (!target) return { success: false, error: 'Booking not found' };
+    // Check if user is admin or owns the booking
+    const { data: rawData } = await supabase.from('bookings').select('*').eq('id', id).single();
+    if (!rawData) return { success: false, error: 'Booking not found' };
+    
+    const target = this._mapFromDB(rawData);
+    
     const isAdmin = SEED_USERS.find(u => u.id === userId)?.role === 'admin';
     if (target.userId !== userId && !isAdmin) return { success: false, error: 'Unauthorized' };
-    await this._writeAll(all.filter(b => b.id !== id));
+    
+    const { error } = await supabase.from('bookings').delete().eq('id', id);
+    if (error) { console.error('Error canceling booking:', error); return { success: false, error: error.message }; }
     return { success: true, error: null };
   }
   static async approveBooking(id, adminId) {
-    await new Promise(r => setTimeout(r, 300));
-    const all = await this._readAll();
-    const idx = all.findIndex(b => b.id === id);
-    if (idx > -1) {
-      all[idx].status = 'confirmed';
-      all[idx].approvedBy = adminId;
-      await this._writeAll(all);
-      return { success: true, error: null };
-    }
-    return { success: false, error: 'Not found' };
+    const { error } = await supabase.from('bookings').update({ status: 'confirmed', approvedby: adminId }).eq('id', id);
+    if (error) { console.error('Error approving booking:', error); return { success: false, error: error.message }; }
+    return { success: true, error: null };
   }
   static async getAnalytics() {
-    const all = await this._readAll();
-    const today = all.filter(b => b.date === TODAY && b.status !== 'cancelled');
+    const { data: all, error } = await supabase.from('bookings').select('*');
+    if (error || !all) return { mostUsedHall: 'N/A', totalToday: 0, pendingCount: 0, morningCount: 0, afternoonCount: 0 };
+    
+    const today = (all || []).map(this._mapFromDB).filter(b => b.date === TODAY && b.status !== 'cancelled');
     const countMap = {};
     let pendingCount = 0;
     let morningCount = 0;
@@ -202,6 +198,9 @@ class MockAPI {
       morningCount,
       afternoonCount,
     };
+  }
+  static async migrateOldData() {
+    // No-op for Supabase migration
   }
 }
 
@@ -261,11 +260,27 @@ export default function App() {
   const [toasts, setToasts] = useState([]);
   const [activeView, setActiveView] = useState('Dashboard');
   const [selectedDate, setSelectedDate] = useState(TODAY);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [currentUser, setCurrentUser] = useState(() => {
     try { return JSON.parse(localStorage.getItem('audisync_session')) || null; } catch { return null; }
   });
 
   useEffect(() => { MockAPI.migrateOldData(); }, []);
+
+  // Set up Supabase Realtime subscription
+  useEffect(() => {
+    const channel = supabase
+      .channel('public:bookings')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, payload => {
+        console.log('Realtime update:', payload);
+        setRefreshTrigger(prev => prev + 1);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   const handleLogout = () => {
     localStorage.removeItem('audisync_session');
@@ -283,8 +298,9 @@ export default function App() {
     currentUser, setCurrentUser,
     activeView, setActiveView,
     selectedDate, setSelectedDate,
+    refreshTrigger,
     addToast,
-  }), [currentUser, activeView, selectedDate, addToast]);
+  }), [currentUser, activeView, selectedDate, refreshTrigger, addToast]);
 
   return (
     <BookingContext.Provider value={ctxValue}>
@@ -525,7 +541,7 @@ function MiniCalendar({ onClose }) {
 
 // ── DASHBOARD ──
 function DashboardView() {
-  const { setActiveView, currentUser, selectedDate, setSelectedDate } = useContext(BookingContext);
+  const { setActiveView, currentUser, selectedDate, refreshTrigger } = useContext(BookingContext);
   const [loading, setLoading] = useState(true);
   const [stats, setStats]     = useState({ totalToday: 0, pendingCount: 0, mostUsedHall: '-', morningCount: 0, afternoonCount: 0 });
   const [recent, setRecent]   = useState([]);
@@ -540,7 +556,7 @@ function DashboardView() {
       setLoading(false);
     });
     return () => { active = false; };
-  }, []);
+  }, [selectedDate, refreshTrigger]);
 
   const totalSlots = SEED_AUDITORIUMS.length * 2;
   const statCards = [
@@ -723,7 +739,7 @@ function DashboardView() {
 
 // ── SCHEDULE VIEW — 2-Row Half-Slot Grid ──
 function ScheduleView() {
-  const { selectedDate, setSelectedDate, currentUser, addToast } = useContext(BookingContext);
+  const { selectedDate, setSelectedDate, currentUser, addToast, refreshTrigger } = useContext(BookingContext);
   const [bookings, setBookings]   = useState([]);
   const [loading, setLoading]     = useState(true);
   const [panelData, setPanelData] = useState(null);
@@ -732,7 +748,7 @@ function ScheduleView() {
   const fetchGrid = useCallback(() => {
     setLoading(true);
     MockAPI.getBookings(selectedDate).then(d => { setBookings(d); setLoading(false); });
-  }, [selectedDate]);
+  }, [selectedDate, refreshTrigger]);
 
   useEffect(() => { fetchGrid(); }, [fetchGrid]);
 
@@ -944,7 +960,7 @@ function BookingPanel({ date, audiId, initialHalfSlotId, existingBookings, onClo
   const [step, setStep]                         = useState(1);
   const [loading, setLoading]                   = useState(false);
   const [confirmedBooking, setConfirmedBooking] = useState(null);
-  const [emailSent, setEmailSent]               = useState(null);
+  const [emailResult, setEmailResult]           = useState(null);
   const [halfSlotId, setHalfSlotId]             = useState(initialHalfSlotId || 'morning');
   const selectedHalfSlot                        = HALF_SLOTS.find(h => h.id === halfSlotId);
 
@@ -1005,7 +1021,7 @@ function BookingPanel({ date, audiId, initialHalfSlotId, existingBookings, onClo
     const emailResult = await EmailService.sendBookingConfirmation(newBooking, currentUser, audi);
     setLoading(false);
     setConfirmedBooking(newBooking);
-    setEmailSent(emailResult.success);
+    setEmailResult(emailResult);
     addToast('Booking confirmed! 🎉', 'success');
     setStep(4);
   };
@@ -1442,10 +1458,12 @@ function BookingPanel({ date, audiId, initialHalfSlotId, existingBookings, onClo
                   <div className="mt-4 pt-3 border-t border-white/[0.07] flex items-center gap-2">
                     <Mail className="w-4 h-4 text-slate-500 shrink-0" />
                     <p className="text-xs text-slate-400">
-                      {emailSent === true
+                      {emailResult?.success === true
                         ? `Confirmation sent to ${form.email}`
-                        : `Email not configured — booking saved successfully`}
-                      {emailSent !== true && <span className="text-slate-600"> (simulated)</span>}
+                        : emailResult?.error 
+                            ? `Email Delivery Failed: ${emailResult.error}` 
+                            : `Email not configured — booking saved successfully`}
+                      {emailResult?.success !== true && !emailResult?.error && <span className="text-slate-600"> (simulated)</span>}
                     </p>
                   </div>
                 </div>
@@ -1496,7 +1514,7 @@ function BookingPanel({ date, audiId, initialHalfSlotId, existingBookings, onClo
 
 // ── MY BOOKINGS VIEW ──
 function MyBookingsView() {
-  const { currentUser, addToast, setActiveView } = useContext(BookingContext);
+  const { currentUser, addToast, setActiveView, refreshTrigger } = useContext(BookingContext);
   const [bks, setBks]           = useState([]);
   const [loading, setLoading]   = useState(true);
   const [filter, setFilter]     = useState('Upcoming');
@@ -1506,7 +1524,7 @@ function MyBookingsView() {
   const fetchBks = useCallback(() => {
     setLoading(true);
     MockAPI.getBookingsByUser(currentUser.id).then(d => { setBks(d); setLoading(false); });
-  }, [currentUser]);
+  }, [currentUser, refreshTrigger]);
   useEffect(() => { fetchBks(); }, [fetchBks]);
 
   const doCancel = async () => {
@@ -1707,19 +1725,18 @@ function MyBookingsView() {
 
 // ── ADMIN PANEL ──
 function AdminPanel() {
-  const { currentUser, setCurrentUser, addToast } = useContext(BookingContext);
+  const { currentUser, setCurrentUser, addToast, refreshTrigger } = useContext(BookingContext);
   const [bks, setBks]         = useState([]);
   const [loading, setLoading] = useState(true);
-  const [allBks, setAllBks]   = useState([]);
+
 
   const fetchGrid = useCallback(() => {
     setLoading(true);
     Promise.all([MockAPI.getBookings(TODAY), MockAPI.getAllBookings()]).then(([today, all]) => {
       setBks(today);
-      setAllBks(all);
       setLoading(false);
     });
-  }, []);
+  }, [refreshTrigger]);
   useEffect(() => { fetchGrid(); }, [fetchGrid]);
 
   const handleApprove = async (id) => {
@@ -2006,23 +2023,8 @@ function LoginView({ onLogin }) {
                 </button>
               </form>
 
-              {/* Quick login hints */}
-              {isLogin && (
-                <div className="mt-4 p-3 bg-white/[0.03] rounded-xl border border-white/[0.07]">
-                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Demo Accounts</p>
-                  <div className="space-y-1">
-                    {SEED_USERS.map(u => (
-                      <button key={u.id}
-                        onClick={() => setForm({ ...form, email: u.email })}
-                        className="w-full text-left text-xs text-slate-400 hover:text-emerald-400 transition-colors px-2 py-1 hover:bg-white/5 rounded-lg flex items-center gap-2">
-                        <span className="w-5 h-5 rounded bg-white/5 flex items-center justify-center text-[9px] font-bold shrink-0">{u.avatar}</span>
-                        <span>{u.name}</span>
-                        <span className="ml-auto text-slate-600 text-[10px] uppercase">{u.role}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
+
+
 
               <button type="button" onClick={() => { setIsLogin(!isLogin); setForm({ name: '', rollNo: '', email: '', department: '' }); }}
                 className="w-full mt-4 text-xs font-bold text-slate-400 hover:text-white transition-colors">

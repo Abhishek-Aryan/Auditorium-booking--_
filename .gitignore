@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Environment variables (contains secrets)
+.env
+
+# Temp files
+lint_output.txt
