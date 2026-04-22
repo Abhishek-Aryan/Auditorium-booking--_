@@ -31,13 +31,13 @@
 
 ## 🏛️ Auditoriums
 
-| Hall | Block | Capacity | Amenities |
-|------|-------|----------|-----------|
-| APJ Abdul Kalam Auditorium | D Block | 300 | Projector, AC, Recording, Stage |
-| PG Block Seminar Hall | PG Block | 120 | Projector, AC, Mic |
-| B Block Seminar Hall | B Block | 80 | Projector, Whiteboard |
-| KS Auditorium | C Block | 200 | Projector, AC, Mic |
-| E Block Seminars (Floor 0–5) | E Block | 60 each | Screen |
+| Hall | Block |
+|------|-------|
+| APJ Abdul Kalam Auditorium | D Block |
+| PG Block Seminar Hall | PG Block |
+| B Block Seminar Hall | B Block |
+| KS Auditorium | C Block |
+| E Block Seminars (Floor 0–5) | E Block |
 
 ---
 
