@@ -661,7 +661,9 @@ function DashboardView() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-bold text-white truncate">{audi?.name}</p>
-                      <p className="text-xs text-slate-500">{hSlot.display}</p>
+                      <p className="text-xs text-slate-500">
+                        {format(parseISO(b.date), 'EEEE, MMM do')} • {hSlot.display}
+                      </p>
                     </div>
                     <span className={cn('text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border shrink-0',
                       b.status === 'confirmed'
@@ -966,10 +968,10 @@ function BookingPanel({ date, audiId, initialHalfSlotId, existingBookings, onClo
   const selectedHalfSlot                        = HALF_SLOTS.find(h => h.id === halfSlotId);
 
   const [form, setForm] = useState({
-    name:       currentUser?.name  || '',
-    rollNo:     currentUser?.rollNo || '',
+    name:       '',
+    rollNo:     currentUser?.name  || '',
     email:      currentUser?.email || '',
-    phone:      currentUser?.phone  || '',
+    phone:      currentUser?.phone || '',
     purpose:    '',
     attendance: '',
   });
