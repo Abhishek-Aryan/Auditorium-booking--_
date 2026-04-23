@@ -896,7 +896,8 @@ function ScheduleView() {
                               <div className="absolute hidden group-hover/bk:block z-[200] left-1/2 -translate-x-1/2 bottom-[108%] w-[240px] pointer-events-none pb-2">
                                 <div className="bg-[#0c1520] border border-white/10 rounded-xl shadow-2xl p-4">
                                   <p className="font-bold text-white text-sm mb-1">{bk.requester_name || 'Requester'}</p>
-                                  {bk.roll_no && <p className="text-[10px] text-slate-500 mb-2">Roll: {bk.roll_no}</p>}
+                                  {bk.roll_no && <p className="text-[10px] text-slate-500 mb-1">Roll: {bk.roll_no}</p>}
+                                  {bk.phone && <p className="text-[10px] text-slate-500 mb-2">📞 {bk.phone}</p>}
                                   <p className="text-xs text-slate-300 mb-3 line-clamp-2">{bk.purpose}</p>
                                   <div className="flex justify-between text-xs">
                                     <span className="text-slate-500 flex items-center gap-1"><Users className="w-3 h-3" /> {bk.attendance}</span>
