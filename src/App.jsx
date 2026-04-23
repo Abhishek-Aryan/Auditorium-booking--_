@@ -539,6 +539,183 @@ function MiniCalendar({ onClose }) {
   );
 }
 
+// ── AUDITORIUM CALENDAR (per-audi with red/green availability) ──
+function AudiCalendar({ audi, onClose, onSelectSlot }) {
+  const { refreshTrigger } = useContext(BookingContext);
+  const [viewMonth, setViewMonth] = useState(() => new Date());
+  const [allBookings, setAllBookings] = useState([]);
+  const [loadingBks, setLoadingBks] = useState(true);
+  const [pickedDate, setPickedDate] = useState(null);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    setLoadingBks(true);
+    // Fetch only this auditorium's bookings from Supabase
+    supabase.from('bookings').select('*').eq('auditoriumid', audi.id).neq('status', 'cancelled')
+      .then(({ data, error }) => {
+        if (error) { console.error('AudiCalendar fetch error:', error); setLoadingBks(false); return; }
+        const mapped = (data || []).map(b => ({
+          ...b,
+          auditoriumId: b.auditoriumid || b.auditoriumId,
+          halfSlot: b.halfslot || b.halfSlot,
+          startSlot: b.startslot || b.startSlot,
+          endSlot: b.endslot || b.endSlot,
+          userId: b.userid || b.userId,
+        }));
+        setAllBookings(mapped);
+        setLoadingBks(false);
+      });
+  }, [audi.id, refreshTrigger]);
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose?.(); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [onClose]);
+
+  const isDateFull = (dayStr) => {
+    const dayBks = allBookings.filter(b => b.date === dayStr);
+    const mornBooked = dayBks.some(b => b.halfSlot === 'morning');
+    const aftBooked = dayBks.some(b => b.halfSlot === 'afternoon');
+    return mornBooked && aftBooked;
+  };
+
+  const hasAnyBooking = (dayStr) => allBookings.some(b => b.date === dayStr);
+
+  const monthStart = startOfMonth(viewMonth);
+  const monthEnd = endOfMonth(viewMonth);
+  const days = eachDayOfInterval({ start: monthStart, end: monthEnd });
+  const startPad = getDay(monthStart);
+  const weekdays = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+  const todayDate = new Date(); todayDate.setHours(0,0,0,0);
+  const maxDate = addDays(todayDate, MAX_FUTURE_DAYS);
+
+  const handleDateClick = (dayStr) => { setPickedDate(dayStr); };
+
+  const handleSlotSelect = (halfSlotId) => {
+    if (pickedDate) { onSelectSlot(audi.id, pickedDate, halfSlotId); onClose?.(); }
+  };
+
+  // For picked date, check which slots are available
+  const pickedDayBks = pickedDate ? allBookings.filter(b => b.date === pickedDate) : [];
+  const mornTaken = pickedDayBks.some(b => b.halfSlot === 'morning');
+  const aftTaken = pickedDayBks.some(b => b.halfSlot === 'afternoon');
+  const mornExpired = pickedDate ? isSlotExpired(pickedDate, 'morning') : false;
+  const aftExpired = pickedDate ? isSlotExpired(pickedDate, 'afternoon') : false;
+
+  return (
+    <motion.div ref={ref}
+      initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+      transition={{ duration: 0.15 }}
+      className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+    >
+      {/* Backdrop */}
+      <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-[360px] max-h-[90vh] overflow-y-auto bg-[#0a1628] border border-white/10 rounded-2xl p-5 shadow-2xl shadow-black/70">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <p className="text-sm font-bold text-white">{audi.name}</p>
+          <p className="text-[10px] text-slate-500">{audi.block} • {audi.capacity} Pax</p>
+        </div>
+        <button onClick={onClose} className="p-1 hover:bg-white/10 rounded-lg"><X className="w-4 h-4 text-slate-400" /></button>
+      </div>
+
+      {/* Month Nav */}
+      <div className="flex items-center justify-between mb-3">
+        <button onClick={() => setViewMonth(subMonths(viewMonth, 1))} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors">
+          <ChevronLeft className="w-4 h-4 text-slate-400" />
+        </button>
+        <span className="text-xs font-bold text-white">{format(viewMonth, 'MMMM yyyy')}</span>
+        <button onClick={() => setViewMonth(addMonths(viewMonth, 1))} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors">
+          <ChevronRight className="w-4 h-4 text-slate-400" />
+        </button>
+      </div>
+
+      {/* Weekday Headers */}
+      <div className="grid grid-cols-7 mb-1">
+        {weekdays.map(wd => (<div key={wd} className="text-center text-[10px] text-slate-600 uppercase font-bold py-1">{wd}</div>))}
+      </div>
+
+      {/* Days Grid */}
+      {loadingBks ? (
+        <div className="h-48 flex items-center justify-center"><Loader2 className="w-5 h-5 text-indigo-400 animate-spin" /></div>
+      ) : (
+        <div className="grid grid-cols-7 gap-0.5">
+          {Array.from({ length: startPad }).map((_, i) => <div key={`pad-${i}`} />)}
+          {days.map(day => {
+            const dayStr = format(day, 'yyyy-MM-dd');
+            const isToday = isSameDay(day, new Date());
+            const isCurrentMonth = isSameMonth(day, viewMonth);
+            const dayNorm = new Date(day); dayNorm.setHours(0,0,0,0);
+            const isPast = dayNorm < todayDate;
+            const isTooFar = dayNorm > maxDate;
+            const isDisabled = !isCurrentMonth || isPast || isTooFar;
+            const full = !isDisabled && isDateFull(dayStr);
+            const hasBooking = !isDisabled && !full && hasAnyBooking(dayStr);
+            const isPicked = dayStr === pickedDate;
+
+            return (
+              <button key={dayStr}
+                onClick={() => { if (!isDisabled && !full) handleDateClick(dayStr); }}
+                disabled={isDisabled || full}
+                className={cn(
+                  'flex flex-col items-center justify-center h-9 w-full rounded-lg transition-all text-sm font-bold',
+                  !isCurrentMonth ? 'opacity-0 pointer-events-none' :
+                  (isPast || isTooFar) ? 'opacity-25 cursor-not-allowed text-slate-600' :
+                  full ? 'bg-rose-500/30 text-rose-300 cursor-not-allowed border border-rose-500/40' :
+                  isPicked ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/30 ring-2 ring-emerald-400' :
+                  isToday ? 'ring-1 ring-emerald-500 text-emerald-400 hover:bg-white/10' :
+                  hasBooking ? 'bg-amber-500/25 text-amber-200 border border-amber-500/30 hover:bg-amber-500/35' :
+                  'bg-emerald-500/15 text-emerald-300 border border-emerald-500/20 hover:bg-emerald-500/25',
+                )}>
+                <span>{format(day, 'd')}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Legend */}
+      <div className="flex items-center gap-3 mt-3 text-[9px] font-bold uppercase tracking-wider text-slate-500">
+        <div className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-emerald-400" /> Free</div>
+        <div className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-amber-400" /> Partial</div>
+        <div className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-rose-400" /> Full</div>
+      </div>
+
+      {/* Slot Picker (when date is picked) */}
+      <AnimatePresence>
+        {pickedDate && (
+          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+            <div className="mt-3 pt-3 border-t border-white/10">
+              <p className="text-xs font-bold text-white mb-2">{format(parseISO(pickedDate), 'EEEE, MMM do')} — Pick a slot</p>
+              <div className="flex gap-2">
+                {HALF_SLOTS.map(hs => {
+                  const taken = hs.id === 'morning' ? mornTaken : aftTaken;
+                  const expired = hs.id === 'morning' ? mornExpired : aftExpired;
+                  const disabled = taken || expired;
+                  return (
+                    <button key={hs.id} onClick={() => !disabled && handleSlotSelect(hs.id)} disabled={disabled}
+                      className={cn(
+                        'flex-1 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 border',
+                        disabled ? 'bg-white/5 text-slate-600 border-white/5 cursor-not-allowed' :
+                        'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20 active:scale-95',
+                      )}>
+                      {hs.id === 'morning' ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+                      {taken ? 'Booked' : expired ? 'Elapsed' : hs.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+    </motion.div>
+  );
+}
+
 // ── DASHBOARD ──
 function DashboardView() {
   const { setActiveView, currentUser, selectedDate, refreshTrigger } = useContext(BookingContext);
@@ -746,6 +923,7 @@ function ScheduleView() {
   const [loading, setLoading]     = useState(true);
   const [panelData, setPanelData] = useState(null);
   const [showCal, setShowCal]     = useState(false);
+  const [audiCalId, setAudiCalId] = useState(null);
 
   const fetchGrid = useCallback(() => {
     setLoading(true);
@@ -758,7 +936,21 @@ function ScheduleView() {
     if (!currentUser) { addToast('Please log in to book.', 'error'); return; }
     if (!BookingEngine.isHalfSlotAvailable(audiId, selectedDate, halfSlotId, bookings)) return;
     if (isSlotExpired(selectedDate, halfSlotId)) { addToast('This slot has already elapsed.', 'error'); return; }
-    setPanelData({ audiId, halfSlotId });
+    setPanelData({ audiId, halfSlotId, bookingDate: selectedDate });
+  };
+
+  const handleAudiCalSelect = (audiId, date, halfSlotId) => {
+    if (!currentUser) { addToast('Please log in to book.', 'error'); return; }
+    setSelectedDate(date);
+    // We need to fetch bookings for that date before opening the panel
+    MockAPI.getBookings(date).then(dateBks => {
+      if (!BookingEngine.isHalfSlotAvailable(audiId, date, halfSlotId, dateBks)) {
+        addToast('That slot is already taken.', 'error'); return;
+      }
+      if (isSlotExpired(date, halfSlotId)) { addToast('This slot has already elapsed.', 'error'); return; }
+      setBookings(dateBks);
+      setPanelData({ audiId, halfSlotId, bookingDate: date });
+    });
   };
 
   const prevDate = () => {
@@ -846,9 +1038,11 @@ function ScheduleView() {
             <div className="divide-y divide-white/[0.04]">
               {SEED_AUDITORIUMS.map(audi => (
                 <div key={audi.id} className="flex group hover:bg-white/[0.015] transition-colors">
-                  {/* Hall Label */}
-                  <div className="w-52 shrink-0 px-4 py-4 border-r border-white/[0.06] sticky left-0 bg-[#080e1d] group-hover:bg-[#0a1225] z-10 flex flex-col justify-center transition-colors">
-                    <h3 className="text-sm font-bold text-white leading-snug line-clamp-2">{audi.name}</h3>
+                  {/* Hall Label — clickable for per-audi calendar */}
+                  <div className="w-52 shrink-0 px-4 py-4 border-r border-white/[0.06] sticky left-0 bg-[#080e1d] group-hover:bg-[#0a1225] z-10 flex flex-col justify-center transition-colors relative">
+                    <button onClick={() => setAudiCalId(audiCalId === audi.id ? null : audi.id)} className="text-left w-full">
+                      <h3 className="text-sm font-bold text-white leading-snug line-clamp-2 hover:text-emerald-400 transition-colors cursor-pointer">{audi.name}</h3>
+                    </button>
                     <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
                       <span className="px-1.5 py-0.5 rounded bg-white/5 text-[9px] font-bold uppercase tracking-wider text-slate-400 border border-white/5">{audi.block}</span>
                       <span className="px-1.5 py-0.5 rounded bg-indigo-500/10 text-[9px] font-bold text-indigo-400 border border-indigo-500/20">{audi.capacity} Pax</span>
@@ -939,11 +1133,19 @@ function ScheduleView() {
         </div>
       </GlassCard>
 
+      {/* Auditorium Calendar Modal */}
+      <AnimatePresence>
+        {audiCalId && (() => {
+          const audi = SEED_AUDITORIUMS.find(a => a.id === audiCalId);
+          return audi ? <AudiCalendar audi={audi} onClose={() => setAudiCalId(null)} onSelectSlot={handleAudiCalSelect} /> : null;
+        })()}
+      </AnimatePresence>
+
       {/* Booking Panel */}
       <AnimatePresence>
         {panelData && (
           <BookingPanel
-            date={selectedDate}
+            date={panelData.bookingDate || selectedDate}
             audiId={panelData.audiId}
             initialHalfSlotId={panelData.halfSlotId}
             existingBookings={bookings}
